@@ -53,11 +53,24 @@ button:disabled{background:#ccc;opacity:0.7}
 <button id="closeLobby" style="width:100%; background:#ccc;">关闭</button>
 </div>
 
+<!-- 聊天页面 -->
+<div id="chatPage" style="margin-top:20px; width:100%; max-width:400px; background:#fff; border-radius:8px; padding:15px; box-shadow:0 2px 6px rgba(0,0,0,0.1);">
+<h3 style="margin-top:0; color:#333; text-align:center;">聊天</h3>
+<div id="chatMessages" style="height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:10px; background:#f9f9f9;">
+<!-- 聊天消息将通过JavaScript动态生成 -->
+</div>
+<div style="display:flex; gap:10px;">
+<input id="chatInput" placeholder="输入消息..." style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;">
+<button id="sendChat" style="padding:8px 16px; background:#5a7fdb; color:#fff; border:none; border-radius:4px; cursor:pointer;">发送</button>
+</div>
+</div>
+
 <!-- 控制台 -->
 <div id="console" style="display:none; position:fixed; top:10px; right:10px; width:300px; background:#f0f0f0; border:1px solid #ccc; border-radius:8px; padding:15px; z-index:1000; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
 <h3 style="margin-top:0; color:#333;">控制台</h3>
 <button id="toggleTurn" style="width:100%; margin-bottom:8px;">转换回合</button>
 <button id="sendPopup" style="width:100%; margin-bottom:8px;">向对方弹窗</button>
+<button id="sendSystemMessage" style="width:100%; margin-bottom:8px;">发送系统消息</button>
 <button id="forceWin" style="width:100%; margin-bottom:8px;">直接胜利</button>
 <button id="restrictOpponent" style="width:100%; margin-bottom:8px;">限制对方行动</button>
 <button id="undoMove" style="width:100%; margin-bottom:12px;">悔棋</button>
@@ -199,6 +212,11 @@ function initSocketIO() {
     console.error('Socket.io连接错误:',error);
     alert('连接服务器失败，请刷新页面重试');
   });
+  
+  // 接收聊天消息
+  g.socket.on('chatMessage', (data) => {
+    addChatMessage(data.username, data.message, 'other');
+  });
 }
 function initBoard(){
   g.cell=Math.floor(e.container.clientWidth/(g.size+1));
@@ -290,6 +308,18 @@ function endGame(msg, shouldSend=false){
   e.turn.textContent='';
   if(g.socket && shouldSend){
     g.socket.emit('gameData', {t:'e',msg});
+    
+    // 发送聊天消息通知对方
+    if(g.name&&g.roomId){
+      g.socket.emit('chatMessage', {
+        roomId: g.roomId,
+        username: '系统',
+        message: msg
+      });
+      
+      // 在本地显示系统消息
+      addChatMessage('系统', msg, 'other');
+    }
   }
 }
 
@@ -429,6 +459,7 @@ const e={
   console:q('#console'),
   toggleTurn:q('#toggleTurn'),
   sendPopup:q('#sendPopup'),
+  sendSystemMessage:q('#sendSystemMessage'),
   forceWin:q('#forceWin'),
   restrictOpponent:q('#restrictOpponent'),
   undoMove:q('#undoMove'),
@@ -440,7 +471,10 @@ const e={
   lobby:q('#lobby'),
   refreshRooms:q('#refreshRooms'),
   roomList:q('#roomList'),
-  closeLobby:q('#closeLobby')
+  closeLobby:q('#closeLobby'),
+  chatInput:q('#chatInput'),
+  sendChat:q('#sendChat'),
+  chatMessages:q('#chatMessages')
 };
 
 // 点击标题3次打开控制台
@@ -541,6 +575,57 @@ function joinRoomFromLobby(roomId){
   e.lobby.style.display='none';
 }
 
+// 聊天功能
+
+// 发送聊天消息
+e.sendChat.onclick=sendChatMessage;
+
+// 回车键发送消息
+e.chatInput.onkeypress=(e)=>{
+  if(e.key==='Enter'){
+    sendChatMessage();
+  }
+};
+
+// 发送聊天消息函数
+function sendChatMessage(){
+  const message=e.chatInput.value.trim();
+  if(!message||!g.name||!g.roomId)return;
+  
+  // 清空输入框
+  e.chatInput.value='';
+  
+  // 显示自己的消息
+  addChatMessage(g.name, message, 'me');
+  
+  // 发送消息到服务器
+  g.socket.emit('chatMessage', {
+    roomId: g.roomId,
+    username: g.name,
+    message: message
+  });
+}
+
+// 添加聊天消息到界面
+function addChatMessage(username, message, type='other'){
+  const messageElement=document.createElement('div');
+  messageElement.style.marginBottom='8px';
+  messageElement.style.padding='6px 10px';
+  messageElement.style.borderRadius='4px';
+  messageElement.style.backgroundColor=type==='me'?'#e3f2fd':'#f1f1f1';
+  messageElement.style.textAlign=type==='me'?'right':'left';
+  messageElement.style.maxWidth='80%';
+  messageElement.style.alignSelf=type==='me'?'flex-end':'flex-start';
+  
+  messageElement.innerHTML=`
+    <div style="font-size:12px; color:#666; margin-bottom:2px;">${username}</div>
+    <div>${message}</div>
+  `;
+  
+  e.chatMessages.appendChild(messageElement);
+  e.chatMessages.scrollTop=e.chatMessages.scrollHeight;
+}
+
 // 转换回合功能
 e.toggleTurn.onclick=()=>{
   if(!g.started||g.gameEnded)return;
@@ -556,6 +641,25 @@ e.sendPopup.onclick=()=>{
   const message=prompt('请输入弹窗消息:');
   if(message&&g.socket){
     g.socket.emit('gameData', {t:'p',msg:message});
+  }
+};
+
+// 发送系统消息功能
+e.sendSystemMessage.onclick=()=>{
+  const message=prompt('请输入系统消息:');
+  if(message&&g.socket&&g.roomId){
+    // 发送系统消息到服务器
+    g.socket.emit('chatMessage', {
+      roomId: g.roomId,
+      username: '系统',
+      message: message
+    });
+    
+    // 在本地显示系统消息
+    addChatMessage('系统', message, 'other');
+    
+    // 弹窗提示发送成功
+    alert('系统消息发送成功！');
   }
 };
 
