@@ -1,747 +1,263 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Socket.io五子棋</title>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<style>
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,sans-serif;margin:0;padding:20px;background:#f8f4e8;display:flex;flex-direction:column;align-items:center;color:#333}
-.container{width:100%;max-width:400px}
-h1{text-align:center;color:#4a3520;margin:0 0 15px;font-size:24px;font-weight:600}
-#board-container{width:100%;height:0;padding-bottom:100%;position:relative;margin:10px auto;background:#dcb35c;border-radius:8px;overflow:hidden;box-shadow:0 4px 8px rgba(0,0,0,0.1)}
-#board{position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none}
-#controls{background:#fff;padding:15px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.1);margin-top:10px}
-input,button{width:100%;padding:12px;margin-bottom:10px;border-radius:5px;border:1px solid #ddd;font-size:15px;appearance:none}
-button{background:#5a7fdb;color:#fff;border:none;font-weight:500}
-button:disabled{background:#ccc;opacity:0.7}
-#game-info{margin-top:15px;padding:12px;background:#f0f0f0;border-radius:5px;text-align:center}
-.piece{position:absolute;border-radius:50%;transform:translate(-50%,-50%);z-index:10}
-.black{background:radial-gradient(circle at 30% 30%,#666,#000);box-shadow:1px 1px 3px rgba(0,0,0,0.3)}
-.white{background:radial-gradient(circle at 30% 30%,#fff,#ddd);box-shadow:1px 1px 3px rgba(0,0,0,0.3)}
-.turn-indicator{margin-top:8px;font-weight:500}
-.my-turn{color:#2e7d32}
-.opponent-turn{color:#c62828}
-</style>
-</head>
-<body>
-<div class="container">
-<h1 id="game-title">Socket.io五子棋</h1>
-<div id="board-container"><canvas id="board"></canvas></div>
-<div id="controls">
-<input id="playerName" placeholder="你的昵称">
-<button id="createGame">创建游戏</button>
-<button id="joinGame">加入游戏</button>
-<button id="showLobby">游戏大厅</button>
-<input id="remotePeerId" placeholder="房间ID" style="display:none">
-<button id="leaveGame" disabled>离开游戏</button>
-<div id="game-info">
-<div id="status">请创建或加入游戏</div>
-<div id="peerId">你的ID: 未连接</div>
-<div id="turnInfo" class="turn-indicator"></div>
-</div>
-</div>
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const path = require('path');
 
-<!-- 游戏大厅 -->
-<div id="lobby" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:400px; background:#f0f0f0; border:1px solid #ccc; border-radius:8px; padding:15px; z-index:1000; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
-<h3 style="margin-top:0; color:#333;">游戏大厅</h3>
-<button id="refreshRooms" style="width:100%; margin-bottom:12px;">刷新房间列表</button>
-<div id="roomList" style="max-height:300px; overflow-y:auto; margin-bottom:12px;">
-<!-- 房间列表将通过JavaScript动态生成 -->
-</div>
-<button id="closeLobby" style="width:100%; background:#ccc;">关闭</button>
-</div>
+// 初始化 Express 和 HTTP 服务器
+const app = express();
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'X-Content-Type-Options'],
+    credentials: true,
+    exposedHeaders: ['Content-Type', 'X-Content-Type-Options']
+}));
 
-<!-- 聊天页面 -->
-<div id="chatPage" style="margin-top:20px; width:100%; max-width:400px; background:#fff; border-radius:8px; padding:15px; box-shadow:0 2px 6px rgba(0,0,0,0.1);">
-<h3 style="margin-top:0; color:#333; text-align:center;">聊天</h3>
-<div id="chatMessages" style="height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:10px; background:#f9f9f9;">
-<!-- 聊天消息将通过JavaScript动态生成 -->
-</div>
-<div style="display:flex; gap:10px;">
-<input id="chatInput" placeholder="输入消息..." style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;">
-<button id="sendChat" style="padding:8px 16px; background:#5a7fdb; color:#fff; border:none; border-radius:4px; cursor:pointer;">发送</button>
-</div>
-</div>
+// 添加x-content-type-options头部
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+});
 
-<!-- 控制台 -->
-<div id="console" style="display:none; position:fixed; top:10px; right:10px; width:300px; background:#f0f0f0; border:1px solid #ccc; border-radius:8px; padding:15px; z-index:1000; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
-<h3 style="margin-top:0; color:#333;">控制台</h3>
-<button id="toggleTurn" style="width:100%; margin-bottom:8px;">转换回合</button>
-<button id="sendPopup" style="width:100%; margin-bottom:8px;">向对方弹窗</button>
-<button id="sendSystemMessage" style="width:100%; margin-bottom:8px;">发送系统消息</button>
-<button id="forceWin" style="width:100%; margin-bottom:8px;">直接胜利</button>
-<button id="restrictOpponent" style="width:100%; margin-bottom:8px;">限制对方行动</button>
-<button id="undoMove" style="width:100%; margin-bottom:12px;">悔棋</button>
+app.use(express.static(path.join(__dirname, 'public')));
 
-<h4 style="margin-bottom:8px; color:#555;">AI模式设置</h4>
-<input id="aiModelName" placeholder="模型名" style="width:100%; margin-bottom:6px; padding:8px; font-size:12px;">
-<input id="aiApiKey" placeholder="API Key" style="width:100%; margin-bottom:6px; padding:8px; font-size:12px;">
-<input id="aiApiUrl" placeholder="API地址" style="width:100%; margin-bottom:8px; padding:8px; font-size:12px;">
-<button id="startAI" style="width:100%; margin-bottom:12px;">启动AI下棋</button>
+// 提供前端文件
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
-<button id="closeConsole" style="width:100%; background:#ccc;">关闭控制台</button>
-</div>
-</div>
-
-<script>
-const g={
-  socket:null,
-  roomId:'',
-  size:15,
-  cell:0,
-  offset:0,
-  board:[],
-  turn:1, // 1=黑 2=白
-  color:0, // 当前玩家颜色(0=未确定,1=黑,2=白)
-  started:false,
-  name:'',
-  gameEnded:false, // 标识游戏是否已结束
-  clickCount:0, // 点击计数器
-  opponentRestricted:false, // 对方行动限制
-  moveHistory:[], // 悔棋历史
-  aiEnabled:false, // AI模式开关
-  aiModelName:'', // AI模型名
-  aiApiKey:'', // AI API Key
-  aiApiUrl:'' // AI API地址
-};
-
-// 初始化Socket.io连接
-function initSocketIO() {
-  g.socket=io('https://gomoku-luyh.onrender.com');
-  
-  // 游戏创建成功
-  g.socket.on('gameCreated', (data) => {
-    g.roomId=data.roomId;
-    g.color=data.color;
-    g.started=false;
-    g.gameEnded=false;
-    e.pid.textContent=`房间ID: ${data.roomId}`;
-    e.status.textContent=`等待玩家加入...`;
-    e.create.disabled=e.join.disabled=true;
-    e.leave.disabled=false;
-    initBoard();
-  });
-  
-  // 游戏加入成功
-  g.socket.on('gameJoined', (data) => {
-    g.roomId=data.roomId;
-    g.color=data.color;
-    g.started=false;
-    g.gameEnded=false;
-    e.pid.textContent=`房间ID: ${data.roomId}`;
-    e.status.textContent=`正在连接...`;
-    e.create.disabled=e.join.disabled=true;
-    e.leave.disabled=false;
-    initBoard();
-  });
-  
-  // 游戏开始
-  g.socket.on('gameStarted', (data) => {
-    g.started=true;
-    g.turn=1;
-    e.status.textContent=`游戏开始！`;
-    upTurn();
-  });
-  
-  // 接收游戏数据
-  g.socket.on('gameData', (data) => {
-    if(!g.gameEnded){
-      if(data.t=='m'){
-        placePiece(g.offset+data.c*g.cell,g.offset+data.r*g.cell,data.col);
-        g.turn=data.col==1?2:1;
-        upTurn();
-        
-        // 检查是否启用AI模式且轮到AI下棋
-        if(g.aiEnabled&&g.color!=g.turn){
-          setTimeout(()=>{
-            aiMakeMove();
-          },500);
+// 获取房间列表
+app.get('/api/rooms', (req, res) => {
+    const roomList = [];
+    rooms.forEach(room => {
+        if (!room.started) { // 只返回未开始的房间
+            roomList.push({
+                id: room.id,
+                players: room.players,
+                playerCount: room.players.length
+            });
         }
-      }else if(data.t=='e'){
-        endGame(data.msg+" (对方)");
-      }else if(data.t=='t'){
-        // 处理转换回合
-        g.turn=data.turn;
-        upTurn();
-      }else if(data.t=='p'){
-        // 处理弹窗消息
-        alert(data.msg);
-      }else if(data.t=='r'){
-        // 处理行动限制
-        g.opponentRestricted=data.restricted;
-        e.restrictOpponent.textContent=g.opponentRestricted?'解除限制对方行动':'限制对方行动';
-      }else if(data.t=='u'){
-        // 处理悔棋
-        if(g.moveHistory.length>0){
-          const lastMove=g.moveHistory.pop();
-          if(lastMove){
-            g.board[lastMove.r][lastMove.c]=0;
-            const pieces=document.querySelectorAll('.piece');
-            if(pieces.length>0){
-              pieces[pieces.length-1].remove();
+    });
+    res.json({ rooms: roomList });
+});
+
+// 处理favicon.ico请求
+app.get('/favicon.ico', (req, res) => {
+    res.status(204).end(); // 204 No Content
+});
+
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"],
+        credentials: true
+    },
+    maxHttpBufferSize: 1e8,
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    transports: ['websocket', 'polling']
+});
+
+// 游戏房间管理
+const rooms = new Map();
+const users = new Map();
+
+io.on('connection', (socket) => {
+    console.log(`用户连接: ${socket.id}`);
+    
+    // 创建游戏房间
+    socket.on('createGame', (data) => {
+        const { username } = data;
+        const roomId = 'game-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        
+        // 创建房间
+        rooms.set(roomId, {
+            id: roomId,
+            players: [{
+                socketId: socket.id,
+                username: username,
+                color: 1 // 黑棋
+            }],
+            started: false,
+            turn: 1 // 1=黑 2=白
+        });
+        
+        // 保存用户信息
+        users.set(socket.id, {
+            socketId: socket.id,
+            username: username,
+            roomId: roomId,
+            color: 1
+        });
+        
+        // 加入房间
+        socket.join(roomId);
+        
+        // 发送房间信息给创建者
+        socket.emit('gameCreated', {
+            roomId: roomId,
+            color: 1
+        });
+        
+        console.log(`${username} 创建了游戏房间 ${roomId}`);
+    });
+    
+    // 加入游戏房间
+    socket.on('joinGame', (data) => {
+        const { username, roomId } = data;
+        const room = rooms.get(roomId);
+        
+        if (!room) {
+            socket.emit('joinError', { message: '房间不存在' });
+            return;
+        }
+        
+        if (room.players.length >= 2) {
+            socket.emit('joinError', { message: '房间已满' });
+            return;
+        }
+        
+        // 添加玩家
+        room.players.push({
+            socketId: socket.id,
+            username: username,
+            color: 2 // 白棋
+        });
+        room.started = true;
+        rooms.set(roomId, room);
+        
+        // 保存用户信息
+        users.set(socket.id, {
+            socketId: socket.id,
+            username: username,
+            roomId: roomId,
+            color: 2
+        });
+        
+        // 加入房间
+        socket.join(roomId);
+        
+        // 发送房间信息给加入者
+        socket.emit('gameJoined', {
+            roomId: roomId,
+            color: 2
+        });
+        
+        // 通知房间内所有玩家游戏开始
+        io.to(roomId).emit('gameStarted', {
+            players: room.players,
+            turn: room.turn
+        });
+        
+        console.log(`${username} 加入了游戏房间 ${roomId}`);
+    });
+    
+    // 转发游戏数据
+    socket.on('gameData', (data) => {
+        const user = users.get(socket.id);
+        if (user && user.roomId) {
+            // 转发数据给房间内其他玩家
+            socket.to(user.roomId).emit('gameData', data);
+        }
+    });
+    
+    // 离开游戏
+    socket.on('leaveGame', () => {
+        const user = users.get(socket.id);
+        if (user && user.roomId) {
+            const room = rooms.get(user.roomId);
+            if (room) {
+                // 从房间中移除玩家
+                room.players = room.players.filter(p => p.socketId !== socket.id);
+                
+                if (room.players.length === 0) {
+                    // 房间为空，删除房间
+                    rooms.delete(user.roomId);
+                } else {
+                    // 通知房间内其他玩家
+                    io.to(user.roomId).emit('playerLeft', {
+                        socketId: socket.id,
+                        username: user.username
+                    });
+                }
             }
-            g.turn=lastMove.col;
-            upTurn();
-          }
+            
+            // 清除用户信息
+            users.delete(socket.id);
+            socket.leave(user.roomId);
+            
+            console.log(`${user.username} 离开了游戏房间 ${user.roomId}`);
         }
-      }
-    }
-  });
-  
-  // 玩家离开
-  g.socket.on('playerLeft', (data) => {
-    if(!g.gameEnded){
-      endGame(`${data.username} 离开了游戏`);
-    }
-  });
-  
-  // 加入错误
-  g.socket.on('joinError', (data) => {
-    alert(data.message);
-  });
-  
-  // 连接成功
-  g.socket.on('connect', () => {
-    console.log('Socket.io连接成功');
-  });
-  
-  // 连接错误
-  g.socket.on('connect_error', (error) => {
-    console.error('Socket.io连接错误:',error);
-    alert('连接服务器失败，请刷新页面重试');
-  });
-  
-  // 接收聊天消息
-  g.socket.on('chatMessage', (data) => {
-    addChatMessage(data.username, data.message, 'other');
-  });
-}
-function initBoard(){
-  g.cell=Math.floor(e.container.clientWidth/(g.size+1));
-  g.offset=g.cell;
-  e.board.width=e.board.height=e.container.clientWidth;
-  const c=e.board.getContext('2d');
-  c.clearRect(0,0,e.board.width,e.board.height);
-  c.strokeStyle='#000';
-  c.lineWidth=1;
-  for(let i=0;i<g.size;i++){
-    c.beginPath();
-    c.moveTo(g.offset,g.offset+i*g.cell);
-    c.lineTo(g.offset+(g.size-1)*g.cell,g.offset+i*g.cell);
-    c.stroke();
-    c.beginPath();
-    c.moveTo(g.offset+i*g.cell,g.offset);
-    c.lineTo(g.offset+i*g.cell,g.offset+(g.size-1)*g.cell);
-    c.stroke();
-  }
-  g.board=Array(g.size).fill().map(()=>Array(g.size).fill(0));
-  g.moveHistory=[]; // 重置悔棋历史
-}
-
-function placePiece(x,y,col){
-  const r=Math.round((y-g.offset)/g.cell);
-  const c=Math.round((x-g.offset)/g.cell);
-  if(r<0||r>=g.size||c<0||c>=g.size||g.board[r][c]||g.gameEnded)return false;
-  g.board[r][c]=col;
-  const p=document.createElement('div');
-  p.className=`piece ${col==1?'black':'white'}`;
-  p.style.width=p.style.height=`${g.cell*0.85}px`;
-  p.style.left=`${g.offset+c*g.cell}px`;
-  p.style.top=`${g.offset+r*g.cell}px`;
-  e.container.appendChild(p);
-  
-  // 记录移动历史
-  g.moveHistory.push({r,c,col});
-  
-  return{r,c,col};
-}
-
-function checkWin(r,c,col){
-  const d=[[0,1],[1,0],[1,1],[1,-1]];
-  for(const[x,y]of d){
-    let n=1;
-    for(let i=1;i<5;i++)if(g.board[r+i*x]?.[c+i*y]==col)n++;else break;
-    for(let i=1;i<5;i++)if(g.board[r-i*x]?.[c-i*y]==col)n++;else break;
-    if(n>=5)return true;
-  }
-  return false;
-}
-
-function handleClick(ev){
-  if(!g.started||g.color!=g.turn||g.gameEnded||g.opponentRestricted)return;
-  const rc=e.board.getBoundingClientRect();
-  const x=(ev.clientX||ev.touches[0].clientX)-rc.left;
-  const y=(ev.clientY||ev.touches[0].clientY)-rc.top;
-  const m=placePiece(x,y,g.turn);
-  
-  if(m){
-    if(checkWin(m.r,m.c,g.turn)){
-      endGame(`${g.turn==1?'黑方':'白方'}获胜!`, true);
-    }else{
-      g.turn=g.turn==1?2:1;
-      upTurn();
-      if(g.socket)g.socket.emit('gameData', {t:'m',...m});
-      
-      // 检查是否启用AI模式且轮到AI下棋
-      if(g.aiEnabled&&g.color!=g.turn){
-        setTimeout(()=>{
-          aiMakeMove();
-        },500);
-      }
-    }
-  }
-}
-
-function upTurn(){
-  if(!g.started||g.gameEnded)return;
-  const myTurn=g.color==g.turn;
-  e.turn.textContent=myTurn?`轮到你了 (${g.turn==1?'黑方':'白方'})`:`等待对方 (${g.turn==1?'黑方':'白方'})`;
-  e.turn.className=myTurn?'turn-indicator my-turn':'turn-indicator opponent-turn';
-}
-
-function endGame(msg, shouldSend=false){
-  g.gameEnded=true;
-  g.started=false;
-  e.status.textContent=msg;
-  e.turn.textContent='';
-  if(g.socket && shouldSend){
-    g.socket.emit('gameData', {t:'e',msg});
-    
-    // 发送聊天消息通知对方
-    if(g.name&&g.roomId){
-      g.socket.emit('chatMessage', {
-        roomId: g.roomId,
-        username: '系统',
-        message: msg
-      });
-      
-      // 在本地显示系统消息
-      addChatMessage('系统', msg, 'other');
-    }
-  }
-}
-
-function createGame(){
-  if(!e.name.value.trim())return alert('请输入昵称');
-  g.name=e.name.value.trim();
-  g.gameEnded=false; // 重置游戏结束状态
-  
-  // 通过Socket.io创建游戏
-  g.socket.emit('createGame', {
-    username: g.name
-  });
-}
-
-function joinGame(){
-  if(!e.name.value.trim()||!e.oppId.value.trim())return alert('请输入昵称和房间ID');
-  g.name=e.name.value.trim();
-  g.gameEnded=false; // 重置游戏结束状态
-  
-  // 通过Socket.io加入游戏
-  g.socket.emit('joinGame', {
-    username: g.name,
-    roomId: e.oppId.value.trim()
-  });
-}
-
-// AI下棋核心函数
-async function aiMakeMove(){
-  if(!g.aiEnabled||!g.started||g.gameEnded||g.color==g.turn)return;
-  
-  try{
-    // 构建棋盘状态数据
-    const boardState={};
-    for(let r=0;r<g.size;r++){
-      for(let c=0;c<g.size;c++){
-        if(g.board[r][c]!=0){
-          boardState[`${r},${c}`]=g.board[r][c]==1?'black':'white';
-        }
-      }
-    }
-    
-    // 调用AI API
-    // 构建符合硅基流动API规范的请求
-    const requestBody={
-      model:g.aiModelName,
-      messages:[
-        {
-          role:"system",
-          content:"你是一个五子棋AI，需要根据当前棋盘状态给出最佳落子位置。"
-        },
-        {
-          role:"user",
-          content:`当前棋盘状态：${JSON.stringify(boardState)}\n棋盘大小：${g.size}\n当前玩家：${g.turn==1?'black':'white'}\n请返回最佳落子位置，格式为 {"row": 行号, "col": 列号}`
-        }
-      ],
-      temperature:0.1
-    };
-    
-    const response=await fetch(g.aiApiUrl,{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':`Bearer ${g.aiApiKey}`
-      },
-      body:JSON.stringify(requestBody)
     });
     
-    if(!response.ok){
-      throw new Error('API调用失败');
-    }
-    
-    const data=await response.json();
-    
-    // 解析AI返回的落子位置
-    try{
-      // 提取AI响应内容
-      let aiResponse;
-      if(data.choices&&data.choices.length>0&&data.choices[0].message){
-        aiResponse=data.choices[0].message.content;
-      }else{
-        throw new Error('无效的API响应格式');
-      }
-      
-      // 尝试从AI响应中提取JSON格式的落子位置
-      const moveMatch=aiResponse.match(/\{[^}]*"row"\s*:\s*\d+[^}]*"col"\s*:\s*\d+[^}]*\}/);
-      if(!moveMatch){
-        throw new Error('无法从AI响应中提取落子位置');
-      }
-      
-      const move=JSON.parse(moveMatch[0]);
-      const r=move.row;
-      const c=move.col;
-      
-      // 检查位置是否合法
-      if(r>=0&&r<g.size&&c>=0&&c<g.size&&g.board[r][c]==0){
-        // 模拟点击落子
-        const x=g.offset+c*g.cell;
-        const y=g.offset+r*g.cell;
-        const m=placePiece(x,y,g.turn);
+    // 聊天消息
+    socket.on('chatMessage', (data) => {
+        const { roomId, username, message } = data;
+        const room = rooms.get(roomId);
         
-        if(m){
-          if(checkWin(m.r,m.c,g.turn)){
-            endGame(`${g.turn==1?'黑方':'白方'}获胜!`,true);
-          }else{
-            g.turn=g.turn==1?2:1;
-            upTurn();
-            if(g.conn?.open)g.conn.send({t:'m',...m});
-          }
+        if (room) {
+            // 转发消息给房间内所有玩家
+            io.to(roomId).emit('chatMessage', {
+                username: username,
+                message: message
+            });
+            
+            console.log(`[房间 ${roomId}] ${username}: ${message}`);
         }
-      }else{
-        throw new Error('AI返回的落子位置无效');
-      }
-    }catch(parseError){
-      console.error('解析AI响应失败:',parseError);
-      alert('解析AI响应失败，请检查API配置或模型是否正确');
-    }
-  }catch(error){
-    console.error('AI下棋失败:',error);
-    alert('AI下棋失败，请检查API配置是否正确');
-  }
-}
-
-function q(s){return document.querySelector(s)}
-const e={
-  board:q('#board'),
-  container:q('#board-container'),
-  create:q('#createGame'),
-  join:q('#joinGame'),
-  showLobby:q('#showLobby'),
-  leave:q('#leaveGame'),
-  name:q('#playerName'),
-  oppId:q('#remotePeerId'),
-  status:q('#status'),
-  pid:q('#peerId'),
-  turn:q('#turnInfo'),
-  title:q('#game-title'),
-  console:q('#console'),
-  toggleTurn:q('#toggleTurn'),
-  sendPopup:q('#sendPopup'),
-  sendSystemMessage:q('#sendSystemMessage'),
-  forceWin:q('#forceWin'),
-  restrictOpponent:q('#restrictOpponent'),
-  undoMove:q('#undoMove'),
-  startAI:q('#startAI'),
-  closeConsole:q('#closeConsole'),
-  aiModelName:q('#aiModelName'),
-  aiApiKey:q('#aiApiKey'),
-  aiApiUrl:q('#aiApiUrl'),
-  lobby:q('#lobby'),
-  refreshRooms:q('#refreshRooms'),
-  roomList:q('#roomList'),
-  closeLobby:q('#closeLobby'),
-  chatInput:q('#chatInput'),
-  sendChat:q('#sendChat'),
-  chatMessages:q('#chatMessages')
-};
-
-// 点击标题3次打开控制台
-e.title.onclick=()=>{
-  g.clickCount++;
-  setTimeout(()=>{
-    g.clickCount=0;
-  },1000);
-  if(g.clickCount>=3){
-    e.console.style.display=e.console.style.display=='none'?'block':'none';
-    g.clickCount=0;
-  }
-};
-
-// 关闭控制台
-e.closeConsole.onclick=()=>{
-  e.console.style.display='none';
-};
-
-// 游戏大厅功能
-
-// 显示游戏大厅
-e.showLobby.onclick=()=>{
-  e.lobby.style.display='block';
-  refreshRoomList();
-};
-
-// 关闭游戏大厅
-e.closeLobby.onclick=()=>{
-  e.lobby.style.display='none';
-};
-
-// 刷新房间列表
-e.refreshRooms.onclick=refreshRoomList;
-
-// 刷新房间列表函数
-async function refreshRoomList(){
-  try{
-    const response=await fetch('https://gomoku-luyh.onrender.com/api/rooms');
-    const data=await response.json();
-    
-    // 清空房间列表
-    e.roomList.innerHTML='';
-    
-    if(data.rooms.length===0){
-      e.roomList.innerHTML='<div style="text-align:center; padding:20px; color:#666;">暂无可用房间</div>';
-      return;
-    }
-    
-    // 显示房间列表
-    data.rooms.forEach(room=>{
-      const roomElement=document.createElement('div');
-      roomElement.style.padding='10px';
-      roomElement.style.borderBottom='1px solid #ddd';
-      roomElement.style.marginBottom='8px';
-      roomElement.style.borderRadius='4px';
-      roomElement.style.backgroundColor='#fff';
-      
-      roomElement.innerHTML=`
-        <div style="font-weight:bold; margin-bottom:4px;">房间: ${room.id}</div>
-        <div style="font-size:12px; color:#666; margin-bottom:8px;">玩家: ${room.playerCount}/2</div>
-        <button class="join-room-btn" data-room-id="${room.id}" style="padding:6px 12px; background:#5a7fdb; color:#fff; border:none; border-radius:4px; cursor:pointer;">加入</button>
-      `;
-      
-      e.roomList.appendChild(roomElement);
     });
     
-    // 添加加入房间按钮事件
-    document.querySelectorAll('.join-room-btn').forEach(btn=>{
-      btn.onclick=()=>{
-        const roomId=btn.dataset.roomId;
-        joinRoomFromLobby(roomId);
-      };
+    // 断开连接处理
+    socket.on('disconnect', () => {
+        const user = users.get(socket.id);
+        if (user && user.roomId) {
+            const room = rooms.get(user.roomId);
+            if (room) {
+                // 从房间中移除玩家
+                room.players = room.players.filter(p => p.socketId !== socket.id);
+                
+                if (room.players.length === 0) {
+                    // 房间为空，删除房间
+                    rooms.delete(user.roomId);
+                } else {
+                    // 通知房间内其他玩家
+                    io.to(user.roomId).emit('playerLeft', {
+                        socketId: socket.id,
+                        username: user.username
+                    });
+                }
+            }
+            
+            // 清除用户信息
+            users.delete(socket.id);
+            
+            console.log(`${user.username} 断开了连接`);
+        } else {
+            console.log(`用户 ${socket.id} 断开了连接`);
+        }
     });
-  }catch(error){
-    console.error('获取房间列表失败:',error);
-    e.roomList.innerHTML='<div style="text-align:center; padding:20px; color:#ff4444;">获取房间列表失败</div>';
-  }
-}
+});
 
-// 从游戏大厅加入房间
-function joinRoomFromLobby(roomId){
-  if(!e.name.value.trim()){
-    alert('请输入昵称');
-    return;
-  }
-  
-  g.name=e.name.value.trim();
-  g.gameEnded=false;
-  
-  // 通过Socket.io加入游戏
-  g.socket.emit('joinGame', {
-    username: g.name,
-    roomId: roomId
-  });
-  
-  // 关闭游戏大厅
-  e.lobby.style.display='none';
-}
+// 启动服务器
+const PORT = process.env.PORT || 1983;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`服务器运行在 http://localhost:${PORT}`);
+    console.log(`服务器可通过网络访问: http://${getLocalIP()}:${PORT}`);
+});
 
-// 聊天功能
-
-// 发送聊天消息
-e.sendChat.onclick=sendChatMessage;
-
-// 回车键发送消息
-e.chatInput.onkeypress=(e)=>{
-  if(e.key==='Enter'){
-    sendChatMessage();
-  }
-};
-
-// 发送聊天消息函数
-function sendChatMessage(){
-  const message=e.chatInput.value.trim();
-  if(!message||!g.name||!g.roomId)return;
-  
-  // 清空输入框
-  e.chatInput.value='';
-  
-  // 显示自己的消息
-  addChatMessage(g.name, message, 'me');
-  
-  // 发送消息到服务器
-  g.socket.emit('chatMessage', {
-    roomId: g.roomId,
-    username: g.name,
-    message: message
-  });
-}
-
-// 添加聊天消息到界面
-function addChatMessage(username, message, type='other'){
-  const messageElement=document.createElement('div');
-  messageElement.style.marginBottom='8px';
-  messageElement.style.padding='6px 10px';
-  messageElement.style.borderRadius='4px';
-  messageElement.style.backgroundColor=type==='me'?'#e3f2fd':'#f1f1f1';
-  messageElement.style.textAlign=type==='me'?'right':'left';
-  messageElement.style.maxWidth='80%';
-  messageElement.style.alignSelf=type==='me'?'flex-end':'flex-start';
-  
-  messageElement.innerHTML=`
-    <div style="font-size:12px; color:#666; margin-bottom:2px;">${username}</div>
-    <div>${message}</div>
-  `;
-  
-  e.chatMessages.appendChild(messageElement);
-  e.chatMessages.scrollTop=e.chatMessages.scrollHeight;
-}
-
-// 转换回合功能
-e.toggleTurn.onclick=()=>{
-  if(!g.started||g.gameEnded)return;
-  g.turn=g.turn==1?2:1;
-  upTurn();
-  if(g.socket){
-    g.socket.emit('gameData', {t:'t',turn:g.turn});
-  }
-};
-
-// 向对方弹窗功能
-e.sendPopup.onclick=()=>{
-  const message=prompt('请输入弹窗消息:');
-  if(message&&g.socket){
-    g.socket.emit('gameData', {t:'p',msg:message});
-  }
-};
-
-// 发送系统消息功能
-e.sendSystemMessage.onclick=()=>{
-  const message=prompt('请输入系统消息:');
-  if(message&&g.socket&&g.roomId){
-    // 发送系统消息到服务器
-    g.socket.emit('chatMessage', {
-      roomId: g.roomId,
-      username: '系统',
-      message: message
-    });
+// 获取本地IP地址
+function getLocalIP() {
+    const os = require('os');
+    const interfaces = os.networkInterfaces();
     
-    // 在本地显示系统消息
-    addChatMessage('系统', message, 'other');
-    
-    // 弹窗提示发送成功
-    alert('系统消息发送成功！');
-  }
-};
-
-// 直接胜利功能
-e.forceWin.onclick=()=>{
-  if(!g.started||g.gameEnded)return;
-  endGame(`${g.color==1?'黑方':'白方'}获胜!`,true);
-};
-
-// 限制对方行动功能
-e.restrictOpponent.onclick=()=>{
-  g.opponentRestricted=!g.opponentRestricted;
-  e.restrictOpponent.textContent=g.opponentRestricted?'解除限制对方行动':'限制对方行动';
-  if(g.socket){
-    g.socket.emit('gameData', {t:'r',restricted:g.opponentRestricted});
-  }
-};
-
-// 悔棋功能
-e.undoMove.onclick=()=>{
-  if(!g.started||g.gameEnded||g.moveHistory.length==0)return;
-  
-  // 移除最后一步棋
-  const lastMove=g.moveHistory.pop();
-  if(lastMove){
-    g.board[lastMove.r][lastMove.c]=0;
-    // 移除DOM元素
-    const pieces=document.querySelectorAll('.piece');
-    if(pieces.length>0){
-      pieces[pieces.length-1].remove();
+    for (const interfaceName in interfaces) {
+        const interface = interfaces[interfaceName];
+        for (const iface of interface) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
     }
-    // 恢复回合
-    g.turn=lastMove.col;
-    upTurn();
-    
-    // 通知对方
-    if(g.socket){
-      g.socket.emit('gameData', {t:'u'});
-    }
-  }
-};
-
-// 启动AI下棋模式
-e.startAI.onclick=()=>{
-  g.aiModelName=e.aiModelName.value.trim();
-  g.aiApiKey=e.aiApiKey.value.trim();
-  g.aiApiUrl=e.aiApiUrl.value.trim();
-  
-  if(!g.aiModelName||!g.aiApiKey||!g.aiApiUrl){
-    alert('请填写模型名、API Key和API地址');
-    return;
-  }
-  
-  g.aiEnabled=!g.aiEnabled;
-  e.startAI.textContent=g.aiEnabled?'关闭AI模式':'启动AI下棋';
-  alert(g.aiEnabled?`AI模式已启动，使用模型: ${g.aiModelName}`:'AI模式已关闭');
-  
-  // 如果启用AI且轮到AI下棋，立即执行
-  if(g.aiEnabled&&g.color!=g.turn){
-    setTimeout(()=>{
-      aiMakeMove();
-    },500);
-  }
-};
-
-e.create.onclick=createGame;
-e.join.onclick=()=>{
-  e.oppId.style.display='block';
-  e.oppId.focus();
-  e.join.textContent='确认加入';
-  e.join.onclick=joinGame;
-};
-e.leave.onclick=()=>{
-  if(g.socket){
-    g.socket.emit('leaveGame');
-  }
-  location.reload();
-};
-e.board.onclick=e.board.ontouchstart=handleClick;
-
-// 初始化Socket.io连接
-initSocketIO();
-</script>
-</body>
-</html>
+    return 'localhost';
+}
