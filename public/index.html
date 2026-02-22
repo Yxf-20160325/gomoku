@@ -293,20 +293,15 @@ function endGame(msg, shouldSend=false){
   g.started=false;
   e.status.textContent=msg;
   e.turn.textContent='';
+  
+  // 本地显示胜利弹窗
+  alert(msg);
+  
   if(g.socket && shouldSend){
     g.socket.emit('gameData', {t:'e',msg});
     
-    // 发送聊天消息通知对方
-    if(g.name&&g.roomId){
-      g.socket.emit('chatMessage', {
-        roomId: g.roomId,
-        username: '系统',
-        message: msg
-      });
-      
-      // 在本地显示系统消息
-      addChatMessage('系统', msg, 'other');
-    }
+    // 发送弹窗消息通知对方
+    g.socket.emit('gameData', {t:'p',msg});
   }
 }
 
