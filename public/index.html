@@ -96,7 +96,7 @@ const g={
 
 // 初始化Socket.io连接
 function initSocketIO() {
-  g.socket=io();
+  g.socket=io('https://gomoku-luyh.onrender.com');
   
   // 游戏创建成功
   g.socket.on('gameCreated', (data) => {
@@ -479,7 +479,7 @@ e.refreshRooms.onclick=refreshRoomList;
 // 刷新房间列表函数
 async function refreshRoomList(){
   try{
-    const response=await fetch('/api/rooms');
+    const response=await fetch('https://gomoku-luyh.onrender.com/api/rooms');
     const data=await response.json();
     
     // 清空房间列表
