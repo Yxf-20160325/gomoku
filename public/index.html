@@ -446,7 +446,6 @@ const e={
   console:q('#console'),
   toggleTurn:q('#toggleTurn'),
   sendPopup:q('#sendPopup'),
-  sendSystemMessage:q('#sendSystemMessage'),
   forceWin:q('#forceWin'),
   restrictOpponent:q('#restrictOpponent'),
   undoMove:q('#undoMove'),
@@ -458,10 +457,7 @@ const e={
   lobby:q('#lobby'),
   refreshRooms:q('#refreshRooms'),
   roomList:q('#roomList'),
-  closeLobby:q('#closeLobby'),
-  chatInput:q('#chatInput'),
-  sendChat:q('#sendChat'),
-  chatMessages:q('#chatMessages')
+  closeLobby:q('#closeLobby')
 };
 
 // 点击标题3次打开控制台
@@ -562,66 +558,6 @@ function joinRoomFromLobby(roomId){
   e.lobby.style.display='none';
 }
 
-// 聊天功能
-
-// 发送聊天消息
-e.sendChat.onclick=sendChatMessage;
-
-// 回车键发送消息
-e.chatInput.onkeypress=(e)=>{
-  if(e.key==='Enter'){
-    sendChatMessage();
-  }
-};
-
-// 发送聊天消息函数
-function sendChatMessage(){
-  const message=e.chatInput.value.trim();
-  if(!message||!g.name||!g.roomId){
-    console.log('发送消息失败：缺少必要信息', { message, name: g.name, roomId: g.roomId });
-    return;
-  }
-  
-  // 清空输入框
-  e.chatInput.value='';
-  
-  // 显示自己的消息
-  addChatMessage(g.name, message, 'me');
-  
-  try{
-    // 发送消息到服务器
-    g.socket.emit('chatMessage', {
-      roomId: g.roomId,
-      username: g.name,
-      message: message
-    });
-    console.log('消息发送成功:', message);
-  }catch(error){
-    console.error('发送消息失败:', error);
-    alert('发送消息失败，请检查网络连接');
-  }
-}
-
-// 添加聊天消息到界面
-function addChatMessage(username, message, type='other'){
-  const messageElement=document.createElement('div');
-  messageElement.style.marginBottom='8px';
-  messageElement.style.padding='6px 10px';
-  messageElement.style.borderRadius='4px';
-  messageElement.style.backgroundColor=type==='me'?'#e3f2fd':'#f1f1f1';
-  messageElement.style.textAlign=type==='me'?'right':'left';
-  messageElement.style.maxWidth='80%';
-  messageElement.style.alignSelf=type==='me'?'flex-end':'flex-start';
-  
-  messageElement.innerHTML=`
-    <div style="font-size:12px; color:#666; margin-bottom:2px;">${username}</div>
-    <div>${message}</div>
-  `;
-  
-  e.chatMessages.appendChild(messageElement);
-  e.chatMessages.scrollTop=e.chatMessages.scrollHeight;
-}
-
 // 转换回合功能
 e.toggleTurn.onclick=()=>{
   if(!g.started||g.gameEnded)return;
@@ -640,24 +576,8 @@ e.sendPopup.onclick=()=>{
   }
 };
 
-// 发送系统消息功能
-e.sendSystemMessage.onclick=()=>{
-  const message=prompt('请输入系统消息:');
-  if(message&&g.socket&&g.roomId){
-    // 发送系统消息到服务器
-    g.socket.emit('chatMessage', {
-      roomId: g.roomId,
-      username: '系统',
-      message: message
-    });
-    
-    // 在本地显示系统消息
-    addChatMessage('系统', message, 'other');
-    
-    // 弹窗提示发送成功
-    alert('系统消息发送成功！');
-  }
-};
+// 发送系统消息功能已移除
+// 原因：用户要求删除聊天功能，相关HTML元素和函数已不存在
 
 // 直接胜利功能
 e.forceWin.onclick=()=>{
